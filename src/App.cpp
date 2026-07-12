@@ -134,6 +134,7 @@ void ecp::loopApp(AppRef app) {
                 size_t read = app.reader.read(buf, sizeof(buf));
                 app.driver.toggleAccessIndicator(true);
                 app.eeprom.writeAt(offset, buf, std::min(read, sizeof(buf)));
+                offset += std::min(read, sizeof(buf));
                 if (app.eeprom.getError() != MC24FCError::OK) {
                     app.state = AppState::ERRORED;
                     break;
@@ -151,7 +152,7 @@ void ecp::loopApp(AppRef app) {
             app.reader.open(app.romName);
             char buf[16];
             char eepbuf[16];
-            app.eeprom.readByte(0x7fff, nullptr); // deliberate wraparound
+            app.eeprom.resetReadPointer();
             while (!app.reader.isEOF()) {
                 size_t read = app.reader.read(buf, sizeof(buf));
                 app.driver.toggleAccessIndicator(true);
