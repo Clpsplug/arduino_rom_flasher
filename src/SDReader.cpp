@@ -13,7 +13,8 @@ bool endsWith(const char *input, const char *suffix) {
 
 SDReader::SDReader(int chipSelectPin) :
     _chipSelectPin(chipSelectPin)
-    , _error(SDReaderError::NotInitialized) {
+    , _error(SDReaderError::NotInitialized)
+    , _lastReadFileName{0,} {
 }
 
 SDReader::~SDReader()
@@ -41,7 +42,7 @@ const char *SDReader::getFileNameEndingWith(const char *extension) {
         if (endsWith(entry.name(), extension)) {
             if (strlen(candidate) != 0) {
                 _error = SDReaderError::FileAmbiguous;
-                Serial.println("Ambiguous!");
+                this->_lastReadFileName[0] = '\0';
                 return "";
             }
             strcpy(candidate, entry.name());
@@ -51,12 +52,12 @@ const char *SDReader::getFileNameEndingWith(const char *extension) {
 
     if (strlen(candidate) == 0) {
         _error = SDReaderError::FileMissing;
-        Serial.println("No file!");
     } else {
         _error = SDReaderError::OK;
     }
 
-    return candidate;
+    strcpy(this->_lastReadFileName, candidate);
+    return this->_lastReadFileName;
 }
 
 void SDReader::open(const char *file_name) {

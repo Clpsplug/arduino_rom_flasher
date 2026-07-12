@@ -30,6 +30,12 @@ IoExpanderDriver::IoExpanderDriver() :
     this->mcp.digitalWrite(ERROR_INDICATOR_PIN, LOW);
 }
 
+void IoExpanderDriver::toggleStatus(bool sd, bool access, bool error) {
+    this->toggleSDIndicator(sd);
+    this->toggleAccessIndicator(access);
+    this->toggleErrorIndicator(error);
+}
+
 void IoExpanderDriver::toggleSDIndicator(bool on) {
     this->mcp.digitalWrite(SD_INDICATOR_PIN, on ? HIGH : LOW);
 }

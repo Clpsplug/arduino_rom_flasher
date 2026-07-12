@@ -6,10 +6,8 @@
 #define ARDUINO_MARQUEE_SYSTEM_SD_READER_H
 #include <SD.h>
 
-namespace ecp
-{
-enum class SDReaderError
-{
+namespace ecp {
+enum class SDReaderError {
     OK,
     NotInitialized,
     NoCard,
@@ -19,8 +17,7 @@ enum class SDReaderError
     MAX
 };
 
-class SDReader
-{
+class SDReader {
 public:
     explicit SDReader(int chipSelectPin = 10);
 
@@ -28,11 +25,11 @@ public:
 
     [[nodiscard]] bool init();
 
-    const char* getFileNameEndingWith(const char* extension);
+    const char *getFileNameEndingWith(const char *extension);
 
-    void open(const char* file_name);
+    void open(const char *file_name);
 
-    int read(char* buf, size_t buf_size);
+    int read(char *buf, size_t buf_size);
 
     bool isEOF();
 
@@ -44,6 +41,7 @@ private:
     int _chipSelectPin;
     SDReaderError _error;
     File _file;
+    char _lastReadFileName[64];
 };
 } // ECP::ArduinoMarquee
 

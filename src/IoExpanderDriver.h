@@ -14,6 +14,7 @@ enum class IoExpanderError: std::uint16_t;
 struct IoExpanderDriver {
     IoExpanderDriver();
 
+    void toggleStatus(bool sd, bool access, bool error);
     void toggleSDIndicator(bool on);
     void toggleAccessIndicator(bool on);
     void toggleErrorIndicator(bool on);
