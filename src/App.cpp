@@ -1,7 +1,3 @@
-//
-// Created by Collapsed PLUG on 2026/07/11.
-//
-
 #include "App.h"
 #include <Arduino.h>
 #include <MC24FC.h>
