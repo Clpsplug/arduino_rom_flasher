@@ -2,15 +2,16 @@
 // Created by Collapsed PLUG on 2026/07/11.
 //
 
+#include <Arduino.h>
 #include "IoExpanderDriver.h"
 
 using namespace ecp;
 
-constexpr int SD_INDICATOR_PIN = 7;
-constexpr int ACCESS_INDICATOR_PIN = 6;
-constexpr int ERROR_INDICATOR_PIN = 5;
-constexpr int SWITCH_PIN = 4;
-constexpr int SDCARD_SENSOR_PIN = 3;
+constexpr int SD_INDICATOR_PIN = 0;
+constexpr int ACCESS_INDICATOR_PIN = 1;
+constexpr int ERROR_INDICATOR_PIN = 2;
+constexpr int SWITCH_PIN = 3;
+constexpr int SDCARD_SENSOR_PIN = 4;
 
 IoExpanderDriver::IoExpanderDriver() :
     error(IoExpanderError::OK),
