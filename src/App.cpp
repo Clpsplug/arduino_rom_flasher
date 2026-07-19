@@ -5,11 +5,14 @@
 #include "App.h"
 #include <Arduino.h>
 #include <MC24FC.h>
+#include <map>
 
 #include "IoExpanderDriver.h"
 #include "SDReader.h"
 
 using namespace ecp;
+
+using AppFunc = void(AppRef);
 
 enum class AppState {
     INIT,
@@ -23,7 +26,7 @@ enum class AppState {
     ENDED,
     ERRORED,
     HARD_FAULT,
-    MAX
+    MAX [[maybe_unused]]
 };
 
 struct ecp::App {
@@ -41,6 +44,10 @@ struct ecp::App {
     MC24FC eeprom;
     AppState state;
     const char *romName;
+
+    const std::map<AppState, AppFunc> appFuncs={
+
+    };
 };
 
 App &ecp::createApp() {
