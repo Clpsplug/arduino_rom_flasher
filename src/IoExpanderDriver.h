@@ -19,8 +19,9 @@ struct IoExpanderDriver {
     void toggleAccessIndicator(bool on);
     void toggleErrorIndicator(bool on);
 
-    bool readSwitch();
-    bool readSDCardSensor();
+    bool readStartWriteSwitch();
+    // True if write protected.
+    bool readWriteProtectionSwitch();
 
 private:
     IoExpanderError error;

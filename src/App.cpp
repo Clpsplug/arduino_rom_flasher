@@ -12,6 +12,11 @@ using namespace ecp;
 
 using AppFunc = std::function<void(AppRef)>;
 
+constexpr int SD_DETECT_PIN = 9;
+constexpr int CHIP_SELECT_PIN = 10;
+
+static void quickI2CDebug();
+
 enum class AppState {
     INIT,
     NO_SD,
@@ -22,6 +27,7 @@ enum class AppState {
     WRITING,
     VERIFYING,
     ENDED,
+    READ_MODE,
     ERRORED,
     HARD_FAULT,
     MAX [[maybe_unused]]
@@ -30,11 +36,12 @@ enum class AppState {
 struct ecp::App {
     App() :
         driver(IoExpanderDriver())
-        , reader(SDReader())
+        , reader(SDReader(CHIP_SELECT_PIN))
         , eeprom(MC24FC())
         , state(AppState::INIT)
-        , romName("") {
-
+        , romName("")
+        , sdPinNumber(SD_DETECT_PIN) {
+        pinMode(sdPinNumber, INPUT_PULLUP);
     }
 
     IoExpanderDriver driver;
@@ -42,8 +49,13 @@ struct ecp::App {
     MC24FC eeprom;
     AppState state;
     const char *romName;
+    int sdPinNumber;
 
     std::unordered_map<AppState, AppFunc> appFuncs;
+
+    bool sdCardInserted() const {
+        return digitalRead(sdPinNumber) == LOW;
+    }
 };
 
 void initialization(AppRef app) {
@@ -55,11 +67,22 @@ void initialization(AppRef app) {
     }
 }
 
+void readMode(AppRef app) {
+    app.driver.toggleStatus(millis() / 1000 % 2 == 0, false, false);
+    if (!app.driver.readWriteProtectionSwitch()) {
+        app.state = AppState::INIT;
+    }
+}
+
 void noSd(AppRef app) {
     // No SD. Indicate an error
     app.driver.toggleStatus(false, false, true);
-    if (app.driver.readSDCardSensor()) {
+
+    if (app.sdCardInserted()) {
         app.state = AppState::CHECK_SD;
+    }
+    if (app.driver.readWriteProtectionSwitch()) {
+        app.state = AppState::INIT;
     }
 }
 
@@ -92,24 +115,24 @@ void checkSd(AppRef app) {
 
 void badSd(AppRef app) {
     app.driver.toggleStatus(false, false, millis() / 500 % 2 == 0);
-    if (!app.driver.readSDCardSensor()) {
+    if (!app.sdCardInserted()) {
         app.state = AppState::NO_SD;
     }
 }
 
 void ambiguousSd(AppRef app) {
     app.driver.toggleStatus(false, false, millis() / 250 % 2 == 0);
-    if (!app.driver.readSDCardSensor()) {
+    if (!app.sdCardInserted()) {
         app.state = AppState::NO_SD;
     }
 }
 
 void flashReady(AppRef app) {
     app.driver.toggleStatus(true, false, false);
-    if (!app.driver.readSDCardSensor()) {
+    if (!app.sdCardInserted()) {
         app.state = AppState::NO_SD;
     }
-    if (app.driver.readSwitch()) {
+    if (app.driver.readStartWriteSwitch()) {
         app.state = AppState::WRITING;
     }
 }
@@ -162,20 +185,20 @@ void onVerify(AppRef app) {
 
 void flashEnded(AppRef app) {
     app.driver.toggleStatus(millis() / 250 % 2 == 0, false, false);
-    if (!app.driver.readSDCardSensor() && !app.driver.readSwitch()) {
+    if (!app.sdCardInserted() && !app.driver.readStartWriteSwitch()) {
         app.state = AppState::NO_SD;
     }
 }
 
 void flashError(AppRef app) {
     app.driver.toggleStatus(true, false, true);
-    if (!app.driver.readSDCardSensor()) {
+    if (!app.sdCardInserted()) {
         app.state = AppState::NO_SD;
     }
 }
 
 void hardFault(AppRef app) {
-    const auto blink = millis() / 125 % 2 == 0;
+    auto blink = millis() / 125 % 2 == 0;
     app.driver.toggleStatus(blink, blink, blink);
 }
 
@@ -183,6 +206,7 @@ App &ecp::createApp() {
     static auto s_app = App();
     s_app.appFuncs = {
         {AppState::INIT, &initialization},
+        {AppState::READ_MODE, &readMode},
         {AppState::NO_SD, &noSd},
         {AppState::CHECK_SD, &checkSd},
         {AppState::READY, &flashReady},
@@ -199,10 +223,68 @@ App &ecp::createApp() {
 
 void ecp::setupApp(AppRef app) {
     Serial.begin(115200);
+    Serial.println("Reset");
+    Wire.begin();
+    delay(1000);
     app.driver.toggleStatus(false, false, false);
     app.state = AppState::INIT;
 }
 
 void ecp::loopApp(AppRef app) {
     app.appFuncs[app.state](app);
+    //quickI2CDebug();
+}
+
+static void quickI2CDebug() {
+    Wire.beginTransmission(0x20);
+    auto ret = Wire.endTransmission();
+    switch (ret) {
+        case 0:
+            Serial.println("MCP is OK");
+            break;
+        case 1:
+            Serial.println("Data too long for MCP");
+            break;
+        case 2:
+            Serial.println("MCP is NOT ACKing");
+            break;
+        case 3:
+            Serial.println("MCP NACKed during data transfer");
+            break;
+        case 4:
+            Serial.println("Other error at MCP");
+            break;
+        case 5:
+            Serial.println("Timed out at MCP");
+            break;
+        default:
+            Serial.println("MCP status Unknown");
+            break;
+    }
+    Wire.beginTransmission(0x50);
+    ret = Wire.endTransmission();
+    switch (ret) {
+        case 0:
+            Serial.println("EEPROM is OK");
+            break;
+        case 1:
+            Serial.println("Data too long for EEPROM");
+            break;
+        case 2:
+            Serial.println("EEPROM is NOT ACKing");
+            break;
+        case 3:
+            Serial.println("EEPROM NACKed during data transfer");
+            break;
+        case 4:
+            Serial.println("Other error at EEPROM");
+            break;
+        case 5:
+            Serial.println("Timed out at EEPROM");
+            break;
+        default:
+            Serial.println("EEPROM status Unknown");
+            break;
+    }
+
 }
