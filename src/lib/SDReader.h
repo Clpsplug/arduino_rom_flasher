@@ -1,10 +1,6 @@
-//
-// Created by Collapsed PLUG on 2026/07/05.
-//
-
 #ifndef ARDUINO_MARQUEE_SYSTEM_SD_READER_H
 #define ARDUINO_MARQUEE_SYSTEM_SD_READER_H
-#include <SD.h>
+#include <SdFat.h>
 
 namespace ecp {
 enum class SDReaderError {
@@ -19,11 +15,14 @@ enum class SDReaderError {
 
 class SDReader {
 public:
+    SDReader();
     explicit SDReader(int chipSelectPin = 10);
 
     ~SDReader();
 
     [[nodiscard]] bool init();
+
+    void deinit();
 
     const char *getFileNameEndingWith(const char *extension);
 
@@ -40,7 +39,7 @@ public:
 private:
     int _chipSelectPin;
     SDReaderError _error;
-    File _file;
+    File& _file;
     char _lastReadFileName[64];
 };
 } // ECP::ArduinoMarquee

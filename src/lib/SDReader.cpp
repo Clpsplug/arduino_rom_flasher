@@ -1,27 +1,33 @@
 #include "SDReader.h"
-#include <string.h>
+#include <SPI.h>
+#include <SdFat.h>
+#include <cstring>
 
 using namespace ecp;
 
 namespace {
+SdFat sd;
+File empty_file = File();
 bool endsWith(const char *input, const char *suffix) {
     auto length = strlen(input);
     auto sufLength = strlen(suffix);
     return strcmp(input + length - sufLength, suffix) == 0;
 }
+} // namespace
+SDReader::SDReader() : SDReader(10) {
 }
 
 SDReader::SDReader(int chipSelectPin) :
-    _chipSelectPin(chipSelectPin)
-    , _error(SDReaderError::NotInitialized)
-    , _lastReadFileName{0,} {
+    _chipSelectPin(chipSelectPin), _error(SDReaderError::NotInitialized), _file(empty_file), _lastReadFileName("") {
 }
 
-SDReader::~SDReader()
-= default;
+SDReader::~SDReader() = default;
 
 bool SDReader::init() {
-    if (!SD.begin(_chipSelectPin)) {
+    delay(100); // Try to wait before the CS pin become stable.
+    if (!sd.begin(SdSpiConfig(_chipSelectPin,
+            DEDICATED_SPI, // TODO:: Make this configurable
+            SD_SCK_MHZ(1)))) {
         _error = SDReaderError::NoCard;
         return false;
     }
@@ -29,23 +35,33 @@ bool SDReader::init() {
     return true;
 }
 
+void SDReader::deinit() {
+    sd.end();
+    _error = SDReaderError::NotInitialized;
+}
+
 const char *SDReader::getFileNameEndingWith(const char *extension) {
-    auto root = SD.open("/");
+    auto root = sd.open("/");
     auto entry = root.openNextFile();
-    char candidate[64] = {0,};
+    char candidate[64] = {
+        0,
+    };
     while (entry) {
         // File starting with _ is macOS artifact...
-        if (entry.name()[0] == '_') {
+        char filename[64];
+        entry.getName(filename, sizeof(filename));
+        Serial.println(filename);
+        if (filename[0] == '_' || filename[0] == '.') {
             entry = root.openNextFile();
             continue;
         }
-        if (endsWith(entry.name(), extension)) {
+        if (endsWith(filename, extension)) {
             if (strlen(candidate) != 0) {
                 _error = SDReaderError::FileAmbiguous;
                 this->_lastReadFileName[0] = '\0';
                 return "";
             }
-            strcpy(candidate, entry.name());
+            strcpy(candidate, filename);
         }
         entry = root.openNextFile();
     }
@@ -61,7 +77,7 @@ const char *SDReader::getFileNameEndingWith(const char *extension) {
 }
 
 void SDReader::open(const char *file_name) {
-    _file = SD.open(file_name);
+    _file = sd.open(file_name);
     if (!_file) {
         _error = SDReaderError::FileMissing;
     }

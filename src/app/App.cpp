@@ -5,8 +5,8 @@
 #include <map>
 #include <unordered_map>
 
-#include "IoExpanderDriver.h"
-#include "SDReader.h"
+#include <lib/IoExpanderDriver.h>
+#include <lib/SDReader.h>
 
 using namespace ecp;
 
@@ -29,18 +29,21 @@ enum class AppState {
     ENDED,
     READ_MODE,
     ERRORED,
+    EEPROM_FAULT,
     HARD_FAULT,
     MAX [[maybe_unused]]
 };
 
 struct ecp::App {
-    App() :
-        driver(IoExpanderDriver())
+    App()
+        : driver(IoExpanderDriver())
         , reader(SDReader(CHIP_SELECT_PIN))
         , eeprom(MC24FC())
         , state(AppState::INIT)
         , romName("")
-        , sdPinNumber(SD_DETECT_PIN) {
+        , sdPinNumber(SD_DETECT_PIN)
+    {
+        // Pull SD chip select pin (10) to pull-up - this is Arduino-side
         pinMode(sdPinNumber, INPUT_PULLUP);
     }
 
@@ -59,17 +62,27 @@ struct ecp::App {
 };
 
 void initialization(AppRef app) {
+    if (!app.driver.init()) {
+        app.state = AppState::HARD_FAULT;
+        return;
+    }
+
     app.eeprom.init();
     if (app.eeprom.getError() != MC24FCError::OK) {
-        app.state = AppState::HARD_FAULT;
+        app.state = AppState::EEPROM_FAULT;
     } else {
-        app.state = AppState::NO_SD;
+        if (app.driver.isWriteProtected()) {
+            app.state = AppState::READ_MODE;
+        } else {
+            app.state = AppState::NO_SD;
+        }
     }
 }
 
 void readMode(AppRef app) {
-    app.driver.toggleStatus(millis() / 1000 % 2 == 0, false, false);
-    if (!app.driver.readWriteProtectionSwitch()) {
+    // If EEPROM is write-protected, this firmware falls back to read-only mode.
+    app.driver.toggleStatus(millis() / 500 % 2 == 0, millis() / 500 % 2 != 0, false);
+    if (!app.driver.isWriteProtected()) {
         app.state = AppState::INIT;
     }
 }
@@ -81,7 +94,7 @@ void noSd(AppRef app) {
     if (app.sdCardInserted()) {
         app.state = AppState::CHECK_SD;
     }
-    if (app.driver.readWriteProtectionSwitch()) {
+    if (app.driver.isWriteProtected()) {
         app.state = AppState::INIT;
     }
 }
@@ -118,12 +131,18 @@ void badSd(AppRef app) {
     if (!app.sdCardInserted()) {
         app.state = AppState::NO_SD;
     }
+    if (app.driver.isWriteProtected()) {
+        app.state = AppState::READ_MODE;
+    }
 }
 
 void ambiguousSd(AppRef app) {
     app.driver.toggleStatus(false, false, millis() / 250 % 2 == 0);
     if (!app.sdCardInserted()) {
         app.state = AppState::NO_SD;
+    }
+    if (app.driver.isWriteProtected()) {
+        app.state = AppState::READ_MODE;
     }
 }
 
@@ -132,8 +151,11 @@ void flashReady(AppRef app) {
     if (!app.sdCardInserted()) {
         app.state = AppState::NO_SD;
     }
-    if (app.driver.readStartWriteSwitch()) {
+    if (app.driver.getStartSwitchDown()) {
         app.state = AppState::WRITING;
+    }
+    if (app.driver.isWriteProtected()) {
+        app.state = AppState::READ_MODE;
     }
 }
 
@@ -185,7 +207,7 @@ void onVerify(AppRef app) {
 
 void flashEnded(AppRef app) {
     app.driver.toggleStatus(millis() / 250 % 2 == 0, false, false);
-    if (!app.sdCardInserted() && !app.driver.readStartWriteSwitch()) {
+    if (!app.sdCardInserted() && !app.driver.getStartSwitchDown()) {
         app.state = AppState::NO_SD;
     }
 }
@@ -197,27 +219,43 @@ void flashError(AppRef app) {
     }
 }
 
-void hardFault(AppRef app) {
+void eepromFault(AppRef app) {
     auto blink = millis() / 125 % 2 == 0;
     app.driver.toggleStatus(blink, blink, blink);
+    if (app.driver.getStartSwitchDown()) {
+        app.state = AppState::INIT;
+    }
+}
+
+void hardFault(AppRef app) {
+    // Cannot move out of this state because the IO driver is not responding.
+    // Deinit SD reader to free up pin 13, which is tied to LED.
+    // We'll show error state on Arduino as much as possible.
+    app.reader.deinit();
+    pinMode(LED_BUILTIN, OUTPUT);
+    digitalWrite(LED_BUILTIN, millis() / 125 % 2 == 0 ? HIGH : LOW);
 }
 
 App &ecp::createApp() {
-    static auto s_app = App();
-    s_app.appFuncs = {
-        {AppState::INIT, &initialization},
-        {AppState::READ_MODE, &readMode},
-        {AppState::NO_SD, &noSd},
-        {AppState::CHECK_SD, &checkSd},
-        {AppState::READY, &flashReady},
-        {AppState::BAD_SD, &badSd},
-        {AppState::NO_FILE_OR_AMBIGUOUS, &ambiguousSd},
-        {AppState::WRITING, &onWrite},
-        {AppState::VERIFYING, &onVerify},
-        {AppState::ENDED, &flashEnded},
-        {AppState::ERRORED, &flashError},
-        {AppState::HARD_FAULT, &hardFault},
-    };
+    static App s_app = [] {
+        auto a = App();
+        a.appFuncs = {
+            {AppState::INIT, &initialization},
+            {AppState::READ_MODE, &readMode},
+            {AppState::NO_SD, &noSd},
+            {AppState::CHECK_SD, &checkSd},
+            {AppState::READY, &flashReady},
+            {AppState::BAD_SD, &badSd},
+            {AppState::NO_FILE_OR_AMBIGUOUS, &ambiguousSd},
+            {AppState::WRITING, &onWrite},
+            {AppState::VERIFYING, &onVerify},
+            {AppState::ENDED, &flashEnded},
+            {AppState::ERRORED, &flashError},
+            {AppState::EEPROM_FAULT, &eepromFault},
+            {AppState::HARD_FAULT, &hardFault},
+        };
+        return a;
+    }();
     return s_app;
 }
 
@@ -226,13 +264,12 @@ void ecp::setupApp(AppRef app) {
     Serial.println("Reset");
     Wire.begin();
     delay(1000);
-    app.driver.toggleStatus(false, false, false);
     app.state = AppState::INIT;
 }
 
 void ecp::loopApp(AppRef app) {
     app.appFuncs[app.state](app);
-    //quickI2CDebug();
+    // quickI2CDebug();
 }
 
 static void quickI2CDebug() {
@@ -286,5 +323,4 @@ static void quickI2CDebug() {
             Serial.println("EEPROM status Unknown");
             break;
     }
-
 }

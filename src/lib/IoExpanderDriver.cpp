@@ -1,9 +1,5 @@
-//
-// Created by Collapsed PLUG on 2026/07/11.
-//
-
-#include <Arduino.h>
 #include "IoExpanderDriver.h"
+#include <Arduino.h>
 
 using namespace ecp;
 
@@ -14,11 +10,16 @@ constexpr int START_WRITE_SWITCH_PIN = 3;
 constexpr int WRITE_PROTECTION_SWITCH = 4;
 
 IoExpanderDriver::IoExpanderDriver() :
-    error(IoExpanderError::OK),
-    mcp(Adafruit_MCP23X17()) {
-    if (!this->mcp.begin_I2C(0x20)) {
+    error(IoExpanderError::NO_INIT),
+    mcp(Adafruit_MCP23X17()),
+    i2c_addr(0x20) {
+}
+
+bool IoExpanderDriver::init(std::uint8_t i2c_addr) {
+    this->i2c_addr = i2c_addr;
+    if (!this->mcp.begin_I2C(i2c_addr)) {
         this->error = IoExpanderError::INIT_FAIL;
-        return;
+        return false;
     }
 
     this->mcp.pinMode(SD_INDICATOR_PIN, OUTPUT);
@@ -29,6 +30,8 @@ IoExpanderDriver::IoExpanderDriver() :
     this->mcp.digitalWrite(SD_INDICATOR_PIN, LOW);
     this->mcp.digitalWrite(ACCESS_INDICATOR_PIN, LOW);
     this->mcp.digitalWrite(ERROR_INDICATOR_PIN, LOW);
+    this->error = IoExpanderError::OK;
+    return true;
 }
 
 void IoExpanderDriver::toggleStatus(bool sd, bool access, bool error) {
@@ -49,10 +52,10 @@ void IoExpanderDriver::toggleErrorIndicator(bool on) {
     this->mcp.digitalWrite(ERROR_INDICATOR_PIN, on ? HIGH : LOW);
 }
 
-bool IoExpanderDriver::readStartWriteSwitch() {
+bool IoExpanderDriver::getStartSwitchDown() {
     return this->mcp.digitalRead(START_WRITE_SWITCH_PIN) == LOW;
 }
 
-bool IoExpanderDriver::readWriteProtectionSwitch() {
+bool IoExpanderDriver::isWriteProtected() {
     return this->mcp.digitalRead(WRITE_PROTECTION_SWITCH) == HIGH;
 }
