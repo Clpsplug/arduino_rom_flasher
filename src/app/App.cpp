@@ -14,8 +14,15 @@ using AppFunc = std::function<void(AppRef)>;
 
 constexpr int SD_DETECT_PIN = 9;
 constexpr int CHIP_SELECT_PIN = 10;
+constexpr int RETRY_COUNT = 5;
 
 static void quickI2CDebug();
+
+namespace {
+bool blink(int ms, bool flip = false) {
+    return millis() / ms % 2 == flip;
+}
+}
 
 enum class AppState {
     INIT,
@@ -62,26 +69,44 @@ struct ecp::App {
 };
 
 void initialization(AppRef app) {
-    if (!app.driver.init()) {
-        app.state = AppState::HARD_FAULT;
-        return;
+    {
+        auto fault = true;
+        for (auto i = 0; i < RETRY_COUNT; i++) {
+            if (app.driver.init()) {
+                fault = false;
+                break;
+            }
+        }
+        if (fault) {
+            app.state = AppState::HARD_FAULT;
+            return;
+        }
     }
 
-    app.eeprom.init();
-    if (app.eeprom.getError() != MC24FCError::OK) {
-        app.state = AppState::EEPROM_FAULT;
-    } else {
-        if (app.driver.isWriteProtected()) {
-            app.state = AppState::READ_MODE;
-        } else {
-            app.state = AppState::NO_SD;
+    {
+        auto fault = true;
+        for (auto i =0; i < RETRY_COUNT; i++) {
+            app.eeprom.init();
+            if (app.eeprom.getError() == MC24FCError::OK) {
+                fault = false;
+                break;
+            }
         }
+        if (fault) {
+            app.state = AppState::EEPROM_FAULT;
+            return;
+        }
+    }
+    if (app.driver.isWriteProtected()) {
+        app.state = AppState::READ_MODE;
+    } else {
+        app.state = AppState::NO_SD;
     }
 }
 
 void readMode(AppRef app) {
     // If EEPROM is write-protected, this firmware falls back to read-only mode.
-    app.driver.toggleStatus(millis() / 500 % 2 == 0, millis() / 500 % 2 != 0, false);
+    app.driver.toggleStatus(blink(500), blink(500,true), false);
     if (!app.driver.isWriteProtected()) {
         app.state = AppState::INIT;
     }
@@ -89,7 +114,7 @@ void readMode(AppRef app) {
 
 void noSd(AppRef app) {
     // No SD. Indicate an error
-    app.driver.toggleStatus(false, false, true);
+    app.driver.toggleStatus(blink(500), false, true);
 
     if (app.sdCardInserted()) {
         app.state = AppState::CHECK_SD;
@@ -127,7 +152,7 @@ void checkSd(AppRef app) {
 }
 
 void badSd(AppRef app) {
-    app.driver.toggleStatus(false, false, millis() / 500 % 2 == 0);
+    app.driver.toggleStatus(blink(500), false, blink(500));
     if (!app.sdCardInserted()) {
         app.state = AppState::NO_SD;
     }
@@ -137,7 +162,7 @@ void badSd(AppRef app) {
 }
 
 void ambiguousSd(AppRef app) {
-    app.driver.toggleStatus(false, false, millis() / 250 % 2 == 0);
+    app.driver.toggleStatus(blink(250), false, blink(250));
     if (!app.sdCardInserted()) {
         app.state = AppState::NO_SD;
     }
@@ -206,9 +231,12 @@ void onVerify(AppRef app) {
 }
 
 void flashEnded(AppRef app) {
-    app.driver.toggleStatus(millis() / 250 % 2 == 0, false, false);
+    app.driver.toggleStatus(blink(250), false, false);
     if (!app.sdCardInserted() && !app.driver.getStartSwitchDown()) {
         app.state = AppState::NO_SD;
+    }
+    if (app.driver.isWriteProtected()) {
+        app.state = AppState::READ_MODE;
     }
 }
 
@@ -217,11 +245,13 @@ void flashError(AppRef app) {
     if (!app.sdCardInserted()) {
         app.state = AppState::NO_SD;
     }
+    if (app.driver.isWriteProtected()) {
+        app.state = AppState::READ_MODE;
+    }
 }
 
 void eepromFault(AppRef app) {
-    auto blink = millis() / 125 % 2 == 0;
-    app.driver.toggleStatus(blink, blink, blink);
+    app.driver.toggleStatus(blink(125), blink(125), blink(125));
     if (app.driver.getStartSwitchDown()) {
         app.state = AppState::INIT;
     }
@@ -233,7 +263,7 @@ void hardFault(AppRef app) {
     // We'll show error state on Arduino as much as possible.
     app.reader.deinit();
     pinMode(LED_BUILTIN, OUTPUT);
-    digitalWrite(LED_BUILTIN, millis() / 125 % 2 == 0 ? HIGH : LOW);
+    digitalWrite(LED_BUILTIN, blink(125) ? HIGH : LOW);
 }
 
 App &ecp::createApp() {
@@ -262,8 +292,6 @@ App &ecp::createApp() {
 void ecp::setupApp(AppRef app) {
     Serial.begin(115200);
     Serial.println("Reset");
-    Wire.begin();
-    delay(1000);
     app.state = AppState::INIT;
 }
 
